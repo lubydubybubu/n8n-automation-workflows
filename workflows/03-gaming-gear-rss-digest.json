@@ -1,0 +1,233 @@
+{
+  "id": "gearRssDigest001",
+  "name": "Weekly gaming-gear RSS digest",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1"
+            }
+          ]
+        }
+      },
+      "id": "a1f1bcc4-416a-4ecc-bf52-45de18b13da4",
+      "name": "Weekly Mon 09:00 KST",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "3652a42b-0a05-4808-b1a7-28dc442c2e3b",
+      "name": "Run now (manual / CLI)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Public gaming/PC hardware news feeds (checked to return valid RSS).\nreturn [\n  'https://www.techpowerup.com/rss/news',\n  'https://www.tomshardware.com/feeds/all',\n  'https://www.kitguru.net/feed/',\n].map((url) => ({ json: { url } }));"
+      },
+      "id": "bad30ace-3686-459e-9465-b18c2be92977",
+      "name": "Feeds",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {}
+      },
+      "id": "e19469fa-718d-4098-8ca4-49176f27cb1b",
+      "name": "Read RSS",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        440,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Keyword filter for gaming peripherals, dedupe by normalised link, newest first, top 10,\n// then split into Discord-sized messages (<2000 chars each).\nconst KEYWORDS = /\\b(mouse|mice|keyboards?|keycaps?|mechanical switch(es)?|headsets?|headphones?|earbuds|IEMs?|monitors?|mousepads?|mouse ?pads?)\\b/i;\nconst EXCLUDE = /\\b(nintendo switch|baby monitor|heart rate monitor)\\b/i;\nconst WEEK_MS = 7 * 24 * 3600 * 1000;\nconst now = Date.now();\nconst seen = new Set();\nconst picked = [];\nfor (const { json: it } of $input.all()) {\n  if (!it.link || !it.title) continue;\n  const text = `${it.title} ${it.contentSnippet ?? ''}`.slice(0, 600);\n  // Title-only match: body snippets mention peripherals in unrelated articles.\n  if (!KEYWORDS.test(it.title)) continue;\n  if (EXCLUDE.test(text)) continue;\n  const key = it.link.split('#')[0].split('?')[0].replace(/\\/$/, '').toLowerCase();\n  if (seen.has(key)) continue;\n  seen.add(key);\n  const ts = Date.parse(it.isoDate || it.pubDate || '') || 0;\n  if (ts && now - ts > WEEK_MS) continue;\n  picked.push({ title: it.title.trim(), link: it.link.split('#')[0], ts, source: (it.link.match(/^https?:\\/\\/(?:www\\.)?([^/]+)/i) || [, '?'])[1] });\n}\npicked.sort((a, b) => b.ts - a.ts);\nconst top = picked.slice(0, 10);\nconst header = `🖱️⌨️🎧🖥️ **주간 게이밍 기어 뉴스 Top ${top.length}** (후보 ${picked.length}건)`;\nconst lines = top.length ? top.map((p, i) => `${i + 1}. ${p.title.slice(0, 140)} — ${p.source}\\n<${p.link}>`) : ['이번 주 해당 키워드 기사 없음'];\nconst chunks = [];\nlet cur = header;\nfor (const l of lines) {\n  if ((cur + '\\n' + l).length > 1900) { chunks.push(cur); cur = l; } else cur += '\\n' + l;\n}\nchunks.push(cur);\nreturn chunks.map((content) => ({ json: { content, items: top.length, candidates: picked.length } }));"
+      },
+      "id": "16dc4313-2237-4da0-9388-138e4cc740d9",
+      "name": "Filter, dedupe, top 10",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "af1d418a-7854-4821-b716-762e71b97dc0",
+              "leftValue": "={{ $env.N8N_DISCORD_WEBHOOK_URL }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0a1e8e63-18ef-43ff-b1c2-54e208fe4866",
+      "name": "Webhook configured?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_DISCORD_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ content: $json.content, allowed_mentions: { parse: [] } }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "1fa1ecbe-591d-46a1-baf1-e7314d1b616f",
+      "name": "Send to Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        -100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {},
+      "id": "0c7a073f-4b54-44b3-9260-b191dba4783d",
+      "name": "Dry run - webhook not set",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        100
+      ]
+    }
+  ],
+  "connections": {
+    "Weekly Mon 09:00 KST": {
+      "main": [
+        [
+          {
+            "node": "Feeds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Feeds": {
+      "main": [
+        [
+          {
+            "node": "Read RSS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read RSS": {
+      "main": [
+        [
+          {
+            "node": "Filter, dedupe, top 10",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter, dedupe, top 10": {
+      "main": [
+        [
+          {
+            "node": "Webhook configured?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook configured?": {
+      "main": [
+        [
+          {
+            "node": "Send to Discord",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Dry run - webhook not set",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run now (manual / CLI)": {
+      "main": [
+        [
+          {
+            "node": "Feeds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Seoul",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

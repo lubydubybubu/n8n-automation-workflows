@@ -1,0 +1,329 @@
+{
+  "id": "uptimeItlubs0001",
+  "name": "itlubs.com uptime + latency check (10 min)",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 10
+            }
+          ]
+        }
+      },
+      "id": "9f1fbd2c-b088-4446-b938-0fc64094fce9",
+      "name": "Every 10 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "7c41381d-1af2-4bd5-ae02-8ddb9a5e5c38",
+      "name": "Run now (manual / CLI)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { startedAt: Date.now() } }];"
+      },
+      "id": "7e48ce1f-f6b0-419e-96d6-92d3359a423e",
+      "name": "Mark start",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://itlubs.com/",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "243af7da-5964-4b0e-9006-a1c96a0144fa",
+      "name": "GET itlubs.com",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Decide whether to notify. Alerts fire on state CHANGE only (down -> alert,\n// back up -> recovery), so a 2-hour outage does not post 12 identical messages.\n// Static data persists only for production (trigger) executions, not manual runs.\nconst URL = 'https://itlubs.com/';\nconst SLOW_MS = 5000;\nconst r = $input.first().json;\nconst startedAt = $('Mark start').first().json.startedAt;\nconst latencyMs = Date.now() - startedAt;\nconst status = typeof r.statusCode === 'number' ? r.statusCode : null;\nconst error = r.error ? String(r.error.message || r.error.code || r.error) : null;\nconst down = status !== 200 || error !== null;\nconst slow = !down && latencyMs > SLOW_MS;\nconst problem = down || slow;\n\nconst state = $getWorkflowStaticData('global');\nconst wasProblem = state.problem === true;\nstate.problem = problem;\nif (problem && !wasProblem) state.since = new Date().toISOString();\n\nreturn [{ json: {\n  url: URL, status, latencyMs, error, down, slow, problem,\n  notify: problem !== wasProblem,\n  kind: problem ? (down ? 'down' : 'slow') : (wasProblem ? 'recovered' : 'ok'),\n  since: state.since || null,\n  checkedAt: new Date().toISOString(),\n} }];"
+      },
+      "id": "cfdd5656-84cd-4cf0-8067-89cb5a1a5604",
+      "name": "Evaluate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d40b27e6-8c9d-4fc9-960f-c5d6ae73d9c5",
+              "leftValue": "={{ $json.notify }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "49f79728-ee1a-4cd4-83ae-70ad8c369640",
+      "name": "State changed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "0e811bd2-d55c-401c-9db8-0d138e2834aa",
+      "name": "No change - nothing to send",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $input.first().json;\nconst kst = (iso) => new Date(iso).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false });\nconst head = { down: '🚨 사이트 응답 이상 / site DOWN', slow: '🐢 응답 지연 / site SLOW', recovered: '✅ 복구됨 / site RECOVERED' }[j.kind];\nconst lines = [\n  `**${head}** — <${j.url}>`,\n  `• HTTP: ${j.status ?? '응답 없음 (no response)'}`,\n  `• 지연 latency: ${j.latencyMs} ms`,\n];\nif (j.error) lines.push(`• 오류 error: ${j.error.slice(0, 300)}`);\nif (j.since && j.kind !== 'recovered') lines.push(`• 시작 since: ${kst(j.since)} KST`);\nlines.push(`• 확인 checked: ${kst(j.checkedAt)} KST`);\nreturn [{ json: { content: lines.join('\\n') } }];"
+      },
+      "id": "ef88a7f4-26ab-44ca-8baf-bcc32530f1ac",
+      "name": "Build message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "bb5a4cd1-0606-4023-b8fe-b8f02ae1e097",
+              "leftValue": "={{ $env.N8N_DISCORD_WEBHOOK_URL }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "6159278b-f234-4385-af06-4c719f18b351",
+      "name": "Webhook configured?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_DISCORD_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ content: $json.content, allowed_mentions: { parse: [] } }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "4fd90936-9e5e-4658-9ba5-09774c99c6c4",
+      "name": "Send to Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        -220
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {},
+      "id": "9f679b87-99b2-4d08-b482-a8476d179f7b",
+      "name": "Dry run - webhook not set",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        -20
+      ]
+    }
+  ],
+  "connections": {
+    "Every 10 minutes": {
+      "main": [
+        [
+          {
+            "node": "Mark start",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark start": {
+      "main": [
+        [
+          {
+            "node": "GET itlubs.com",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET itlubs.com": {
+      "main": [
+        [
+          {
+            "node": "Evaluate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate": {
+      "main": [
+        [
+          {
+            "node": "State changed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "State changed?": {
+      "main": [
+        [
+          {
+            "node": "Build message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No change - nothing to send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build message": {
+      "main": [
+        [
+          {
+            "node": "Webhook configured?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook configured?": {
+      "main": [
+        [
+          {
+            "node": "Send to Discord",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Dry run - webhook not set",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run now (manual / CLI)": {
+      "main": [
+        [
+          {
+            "node": "Mark start",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Seoul",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

@@ -1,0 +1,297 @@
+{
+  "id": "githubDigest0001",
+  "name": "GitHub daily digest (09:00 KST)",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * *"
+            }
+          ]
+        }
+      },
+      "id": "c46495bb-342a-4966-b694-89db8d085d41",
+      "name": "Daily 09:00 KST",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "289aad86-153a-4a25-b129-74389450a49d",
+      "name": "Run now (manual / CLI)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Public repos to summarise. Unauthenticated GitHub API = 60 req/h; this uses 6/day.\nconst OWNER = 'lubydubybubu';\nconst REPOS = ['self-healing-homelab-monitor', 'verified-git-upload-queue', 'portfolio-case-studies'];\nreturn REPOS.map((repo) => ({ json: { owner: OWNER, repo } }));"
+      },
+      "id": "a23122e3-a939-4711-a85e-2f1375386d4b",
+      "name": "Repos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{ $json.owner }}/{{ $json.repo }}",
+        "options": {
+          "timeout": 10000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            },
+            {
+              "name": "User-Agent",
+              "value": "n8n-github-digest"
+            }
+          ]
+        }
+      },
+      "id": "88f79b56-e872-4844-b89b-74457ab142e0",
+      "name": "Get repo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{ $('Repos').item.json.owner }}/{{ $('Repos').item.json.repo }}/actions/runs?per_page=1",
+        "options": {
+          "timeout": 10000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            },
+            {
+              "name": "User-Agent",
+              "value": "n8n-github-digest"
+            }
+          ]
+        }
+      },
+      "id": "0175ea4d-9de1-4070-8729-8d967e05c4a5",
+      "name": "Latest Actions run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const repos = $('Repos').all();\nconst info = $('Get repo').all();\nconst runs = $input.all();\nconst today = new Date().toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' });\nconst icon = { success: '✅', failure: '❌', cancelled: '⚪', timed_out: '⏱️', action_required: '⚠️' };\nlet totalStars = 0;\nconst lines = [`📊 **GitHub 일일 요약** (${today})`];\nrepos.forEach((r, i) => {\n  const { owner, repo } = r.json;\n  const meta = info[i]?.json ?? {};\n  const run = (runs[i]?.json?.workflow_runs ?? [])[0];\n  if (meta.message || meta.error) {\n    lines.push(`• **${repo}** — 조회 실패: ${String(meta.message || meta.error.message || meta.error).slice(0, 120)}`);\n    return;\n  }\n  const stars = meta.stargazers_count ?? 0;\n  totalStars += stars;\n  let ci = 'Actions 실행 기록 없음';\n  if (run) {\n    const result = run.status === 'completed' ? (run.conclusion ?? 'unknown') : `진행 중 (${run.status})`;\n    const when = new Date(run.updated_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false });\n    ci = `${icon[run.conclusion] ?? '🔄'} 최근 Actions: ${result} · ${run.name} · ${when}`;\n  }\n  lines.push(`• **${repo}** — ⭐ ${stars} · ${ci}  <https://github.com/${owner}/${repo}>`);\n});\nlines.push(`합계 ⭐ ${totalStars}`);\nreturn [{ json: { content: lines.join('\\n').slice(0, 1900) } }];"
+      },
+      "id": "7c6d60f6-dd04-481c-b3a9-c37c3c8277db",
+      "name": "Format Korean summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a080b036-5cbf-4e8a-8673-519f37e9439d",
+              "leftValue": "={{ $env.N8N_DISCORD_WEBHOOK_URL }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "abcdfbf4-a0a2-41dd-aa15-2ea275be36e3",
+      "name": "Webhook configured?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_DISCORD_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ content: $json.content, allowed_mentions: { parse: [] } }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "7d7aafa7-a311-4e2a-8221-3b7a84cd7298",
+      "name": "Send to Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        -100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {},
+      "id": "0d5c7405-b45d-41e7-b155-915f0919468d",
+      "name": "Dry run - webhook not set",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        100
+      ]
+    }
+  ],
+  "connections": {
+    "Daily 09:00 KST": {
+      "main": [
+        [
+          {
+            "node": "Repos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Repos": {
+      "main": [
+        [
+          {
+            "node": "Get repo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get repo": {
+      "main": [
+        [
+          {
+            "node": "Latest Actions run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Latest Actions run": {
+      "main": [
+        [
+          {
+            "node": "Format Korean summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Korean summary": {
+      "main": [
+        [
+          {
+            "node": "Webhook configured?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook configured?": {
+      "main": [
+        [
+          {
+            "node": "Send to Discord",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Dry run - webhook not set",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run now (manual / CLI)": {
+      "main": [
+        [
+          {
+            "node": "Repos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Seoul",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

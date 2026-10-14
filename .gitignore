@@ -1,0 +1,9 @@
+.env
+*.env
+!.env.example
+*.sqlite
+*.sqlite-*
+.n8n/
+exec-*.json
+__pycache__/
+.DS_Store

@@ -1,0 +1,53 @@
+# n8n single-node lab: SQLite in a named volume, LAN/loopback bind only.
+# Secrets come from .env (chmod 600, never committed). See .env.example.
+name: n8n
+
+services:
+  n8n:
+    image: n8nio/n8n:2.43.5   # pinned; bump deliberately after reading release notes
+    restart: unless-stopped
+    mem_limit: 768m
+    ports:
+      # Bind to one interface only. Default is loopback; set N8N_BIND_IP to
+      # the host's LAN address in .env to reach it from the LAN. Never 0.0.0.0.
+      - "${N8N_BIND_IP:-127.0.0.1}:5678:5678"
+    environment:
+      GENERIC_TIMEZONE: Asia/Seoul
+      TZ: Asia/Seoul
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      # Plain HTTP on a private LAN: browsers drop "Secure" cookies over http,
+      # which would make login impossible. Only acceptable because the port is
+      # not exposed publicly; put HTTPS (reverse proxy/Tailscale) in front and
+      # set this back to true before any wider exposure.
+      N8N_SECURE_COOKIE: "false"
+      # Encrypts stored credentials in the SQLite DB. Losing it = credentials
+      # are unrecoverable; leaking it = credentials are decryptable.
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in .env}
+      # Workflows read the Discord webhook from $env instead of embedding it.
+      N8N_DISCORD_WEBHOOK_URL: ${N8N_DISCORD_WEBHOOK_URL:-}
+      # n8n 2.x blocks $env in expressions by default; allowed here because the
+      # instance is single-user and only the webhook URL is exposed this way.
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+      DB_SQLITE_POOL_SIZE: "2"
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: "168"
+    volumes:
+      - n8n-data:/home/node/.n8n
+      - ./workflows:/workflows:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5678/healthz >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+volumes:
+  n8n-data:
+    name: n8n-data
